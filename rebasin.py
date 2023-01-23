@@ -48,6 +48,30 @@ model2 = nn.Sequential(
     GEMLinear(WIDTH, 10, threshold=0.5, train_weights=False))
 
 # %%
+def similarity(model1, model2, loader):
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(DEV)
+            y = y.to(DEV)
+            y1 = model1(x)
+            y2 = model2(x)
+            # cosine similarity
+            cos = nn.CosineSimilarity(dim=1, eps=1e-6)
+            sim = cos(y1, y2)
+            return sim
+
+def evaluate(model, loader):
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(DEV)
+            y = y.to(DEV)
+            y1 = model(x)
+            loss = nn.CrossEntropyLoss()(y1, y)
+            acc = accuracy(y1, y)
+            return loss, acc
+
+# %%
+
 model1.load_state_dict(torch.load("/data/kitouni/LWOT/MNIST/MLP/checkpoints/MLP_9500.pt"))
 model2.load_state_dict(torch.load("/data/kitouni/LWOT/MNIST/MLP/checkpoints/MLP_9000.pt"))
 
@@ -57,14 +81,37 @@ model2 = model2.to(DEV)
 model1.eval()
 model2.eval()
 
-for x, y in val_dataset:
-    x = x.to(DEV)
-    y = y.to(DEV)
-    y1 = model1(x)
-    y2 = model2(x)
-    # cosine similarity
-    cos = nn.CosineSimilarity(dim=1, eps=1e-6)
-    print(cos(y1, y2))
+sim = similarity(model1, model2, valloader)
+print("mean similarity", sim.mean().item())
+print("max similarity", sim.max().item())
+print("min similarity", sim.min().item())
+print("std similarity", sim.std().item())
+# %%
+lambd = 0.5
+model3 = deepcopy(model1)
+for p1, p2, p3 in zip(model1.parameters(), model2.parameters(), model3.parameters()):
+    p3.data = lambd * p1.data + (1-lambd) * p2.data
+
+model3 = model3.to(DEV)
+model3.eval()
+
+print(f"convex combination lambda {lambd}")
+sim = similarity(model3, model1, valloader)
+print("mean similarity", sim.mean().item())
+print("max similarity", sim.max().item())
+print("min similarity", sim.min().item())
+print("std similarity", sim.std().item())
+
+print("Val Performance")
+print("model1", "loss: {}, acc: {}".format(*evaluate(model1, valloader)))
+print("model2", "loss: {}, acc: {}".format(*evaluate(model2, valloader)))
+print("model3", "loss: {}, acc: {}".format(*evaluate(model3, valloader)))
+
+print("Train Performance")
+print("model1", "loss: {}, acc: {}".format(*evaluate(model1, trainloader)))
+print("model2", "loss: {}, acc: {}".format(*evaluate(model2, trainloader)))
+print("model3", "loss: {}, acc: {}".format(*evaluate(model3, trainloader)))
+
 
 
 
