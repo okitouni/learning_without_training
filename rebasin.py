@@ -2,12 +2,13 @@
 import torch
 from torch import nn
 from torchvision.datasets import MNIST
-from lwot.models import GEMLinear, Scale
+from lwot.models import get_model
 from lwot.utils import Loader, accuracy
 from copy import deepcopy
 
 DEV = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 # MODEL PARAMS
+
 SCALE = 2
 WIDTH = 512
 # Loss PARAMS
@@ -28,25 +29,18 @@ trainloader = Loader(train_dataset, batch_size=BATCHSIZE, device=DEV)
 valloader = Loader(val_dataset, batch_size=-1, device=DEV)
 
 
-model1 = nn.Sequential(
-    nn.Flatten(),
-    Scale(SCALE, train=True, use_sigmoid=True),
-    GEMLinear(28 * 28, WIDTH, threshold=0.5, train_weights=False),
-    nn.ReLU(),
-    GEMLinear(WIDTH, WIDTH, threshold=0.5, train_weights=False),
-    nn.ReLU(),
-    GEMLinear(WIDTH, 10, threshold=0.5, train_weights=False),
+model1 = get_model(
+    width=WIDTH,
+    depth=3,
+    scale=SCALE
 )
 
-model2 = nn.Sequential(
-    nn.Flatten(),
-    Scale(SCALE, train=True, use_sigmoid=True),
-    GEMLinear(28 * 28, WIDTH, threshold=0.5, train_weights=False),
-    nn.ReLU(),
-    GEMLinear(WIDTH, WIDTH, threshold=0.5, train_weights=False),
-    nn.ReLU(),
-    GEMLinear(WIDTH, 10, threshold=0.5, train_weights=False),
+model2 = get_model(
+    width=WIDTH,
+    depth=3,
+    scale=SCALE
 )
+
 
 # %%
 def similarity(model1, model2, loader):
@@ -74,12 +68,12 @@ def evaluate(model, loader):
 
 
 # %%
-
+name = f"{WIDTH}_tau{TAU}_scale{SCALE}"
 model1.load_state_dict(
-    torch.load("/data/kitouni/LWOT/MNIST/MLP/checkpoints/MLP_9500.pt")
+    torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9999.pt")
 )
 model2.load_state_dict(
-    torch.load("/data/kitouni/LWOT/MNIST/MLP/checkpoints/MLP_9000.pt")
+    torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9000.pt")
 )
 
 model1 = model1.to(DEV)
@@ -119,5 +113,13 @@ print("model1", "loss: {}, acc: {}".format(*evaluate(model1, trainloader)))
 print("model2", "loss: {}, acc: {}".format(*evaluate(model2, trainloader)))
 print("model3", "loss: {}, acc: {}".format(*evaluate(model3, trainloader)))
 
+
+# %%
+cos = nn.CosineSimilarity(dim=-1, eps=1e-6)
+for p1, p2 in zip(model1.parameters(), model2.parameters()):
+    print(cos(p1.float(), p2.float()).mean().item())
+# %%
+for n, p in model1.named_parameters():
+    print(n, p.dtype)
 
 # %%

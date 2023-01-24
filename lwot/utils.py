@@ -37,3 +37,10 @@ class Loader:
 
 def accuracy(y_pred, y_true):
     return (y_pred.argmax(dim=1) == y_true).float().mean() * 100
+
+def topk_mask(x, k):
+    shape = x.shape
+    x = x.view(-1)
+    smallest = torch.topk(x, k)[0][-1]
+    x = (x >= smallest).float()
+    return x.view(shape)
