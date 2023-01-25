@@ -79,11 +79,13 @@ class GEMBase:
 
     def train_weights(self, train=True):
         self.weight.requires_grad_(train)
-        self.bias.requires_grad_(train)
+        if self.bias is not None:
+            self.bias.requires_grad_(train)
 
     def train_scores(self, train=True):
         self.weight_scores.requires_grad_(train)
-        self.bias_scores.requires_grad_(train)
+        if self.bias is not None:
+            self.bias_scores.requires_grad_(train)
 
     def sparsity(self, which="weight"):
         """Get the sparsity of the layer.

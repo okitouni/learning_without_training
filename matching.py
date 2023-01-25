@@ -1,8 +1,7 @@
 # %%
-
 from scipy.optimize import linear_sum_assignment
 import torch
-from lwot.models import GEMLinear
+from lwot.models import GEMLinear, GEMBase
 from copy import deepcopy
 
 
@@ -17,7 +16,7 @@ def dot_product_matching(m1, m2, inplace=True):
     for l1, l2, l3 in zip(m1.children(), m2.children(), m3.children()):
         if not isinstance(l1, torch.nn.Linear):
             continue
-        w1 = l1.weight.data.clone()
+        w1 = l1.weight.data.clone() # this clone is necessary tho to avoid inplace ops (I think)
         w2 = l2.weight.data
         if prev_permutation is not None:
             w1 = w1.T[prev_permutation].T
@@ -27,7 +26,7 @@ def dot_product_matching(m1, m2, inplace=True):
         prev_permutation = col_ind
         l3.weight.data = w1[col_ind]
         if l3.bias is not None:
-          l3.bias.data = l1.bias[col_ind]
+            l3.bias.data = l1.bias[col_ind]
     return m3
 
 
@@ -35,30 +34,27 @@ def dot_product_matching_with_scores(m1, m2, inplace=True):
     m3 = m1 if inplace else deepcopy(m1)
     prev_permutation = None
     for l1, l2, l3 in zip(m1.children(), m2.children(), m3.children()):
-        if not isinstance(l1, GEMLinear):
+        if not isinstance(l1, GEMBase):
             continue
-        w1 = l1.masked_weight.data.clone()
-        w2 = l2.masked_weight.data.clone()
         if prev_permutation is not None:
-            w1 = w1.T[prev_permutation].T
-            l3.weight_scores.data = l3.weight_scores.data.T[prev_permutation].T
-            l3.weight.data = l3.weight.data.T[prev_permutation].T
-        w1 = w1.detach().cpu().numpy()
-        w2 = w2.detach().cpu().numpy()
+            l3.weight_scores.data = l3.weight_scores.data.T[prev_permutation].T # permute score columns
+            l3.weight.data = l3.weight.data.T[prev_permutation].T # permute actual weight columns
+        w1 = l3.masked_weight.data.detach().cpu().numpy()
+        w2 = l2.masked_weight.data.detach().cpu().numpy()
         _, col_ind = linear_sum_assignment(-w1 @ w2.T)
-        l3.weight.data = l3.weight.data[col_ind]
-        l3.weight_scores.data = l3.weight_scores.data[col_ind]
+        l3.weight.data = l3.weight.data[col_ind] # permute weight rows
+        l3.weight_scores.data = l3.weight_scores.data[col_ind] # permute score rows
         if l3.bias is not None:
-          l3.bias.data = l1.bias[col_ind]
-          l3.bias_scores.data = l1.bias_scores[col_ind]
-        prev_permutation = col_ind
+            l3.bias.data = l3.bias.data[col_ind]
+            l3.bias_scores.data = l3.bias_scores.data[col_ind]
+        prev_permutation = col_ind        
     return m3
 
 
 def test_weight_matching():
     print("test weight matching")
     w1_A = torch.tensor([[1, 2], [3, 4]]).float()
-    w1_B = torch.tensor([[3, 4], [0, 2]]).float()
+    w1_B = torch.tensor([[3, 4], [1, 2]]).float()
 
     w2_A = torch.tensor([[5, 6], [7, 8]]).float()
     w2_B = torch.tensor([[6, 5], [8, 7]]).float()
@@ -168,7 +164,7 @@ def activation_matching(a1, a2):
     return col_ind
 
 
-def match_model_2_to_1(data, model1, model2):
+def activation_match_model_2_to_1(data, model1, model2):
     # side effects on model2 (changing the weights to match model1)
     # W'_l = P_l @ W_l @ P_{l-1}.T
     # data.shape = (n_training_points, features)

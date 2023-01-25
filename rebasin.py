@@ -2,13 +2,14 @@
 import torch
 from torch import nn
 from torchvision.datasets import MNIST
-from lwot.models import get_model
+from lwot.models import get_model, GEMBase
 from lwot.utils import Loader, accuracy
 from copy import deepcopy
+from matching import dot_product_matching
 
+# CONFIG
 DEV = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 # MODEL PARAMS
-
 SCALE = 2
 WIDTH = 512
 # Loss PARAMS
@@ -28,7 +29,10 @@ val_dataset.data = val_dataset.data.float() / 255
 trainloader = Loader(train_dataset, batch_size=BATCHSIZE, device=DEV)
 valloader = Loader(val_dataset, batch_size=-1, device=DEV)
 
-
+# BTW THIS IS MEANT TO BE RUN IN A JUPYTER NOTEBOOK
+# SO THE LOGICAL FLOW IS A BIT WONKY lol
+# lets see
+# where are the models loaded
 model1 = get_model(
     width=WIDTH,
     depth=3,
@@ -68,17 +72,26 @@ def evaluate(model, loader):
 
 
 # %%
-name = f"{WIDTH}_tau{TAU}_scale{SCALE}"
+# name = f"{WIDTH}_tau{TAU}_scale{SCALE}"
+# model1.load_state_dict(
+#     torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9999.pt")
+# )
+# model2.load_state_dict(
+#     torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_4000.pt")
+# )
+
+# LOAD MODEL WEIGHTS
+name = f"{WIDTH}_tau{TAU}_scale{SCALE}_msNone_seed0"
 model1.load_state_dict(
     torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9999.pt")
 )
+name = f"{WIDTH}_tau{TAU}_scale{SCALE}_msNone_seed1"
 model2.load_state_dict(
-    torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9000.pt")
+    torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9999.pt")
 )
 
 model1 = model1.to(DEV)
 model2 = model2.to(DEV)
-
 model1.eval()
 model2.eval()
 
@@ -115,11 +128,22 @@ print("model3", "loss: {}, acc: {}".format(*evaluate(model3, trainloader)))
 
 
 # %%
-cos = nn.CosineSimilarity(dim=-1, eps=1e-6)
-for p1, p2 in zip(model1.parameters(), model2.parameters()):
-    print(cos(p1.float(), p2.float()).mean().item())
-# %%
-for n, p in model1.named_parameters():
-    print(n, p.dtype)
+name = f"{WIDTH}_tau{TAU}_scale{SCALE}"
+model1.load_state_dict(
+    torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9999.pt")
+)
+name = f"{WIDTH}_tau{TAU}_scale{SCALE}_ms{0}"
+model2.load_state_dict(
+    torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9999.pt")
+)
 
+cos = nn.CosineSimilarity(dim=-1, eps=1e-6)
+for (name, p1), (_, p2) in zip(model1.named_parameters(), model2.named_parameters()):
+    print(name, cos(p1.view(-1), p2.view(-1)).mean().item())
+
+# %%
+print("dot product matching")
+model3 = dot_product_matching(model1, model2, inplace=True)
+for (name, p3), (_, p2) in zip(model3.named_parameters(), model2.named_parameters()):
+    print(name,_,  cos(p3.view(-1), p2.view(-1)).mean().item())
 # %%
