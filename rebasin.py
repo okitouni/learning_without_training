@@ -5,7 +5,7 @@ from torchvision.datasets import MNIST
 from lwot.models import get_model, GEMBase
 from lwot.utils import Loader, accuracy
 from copy import deepcopy
-from matching import dot_product_matching
+from matching import dot_product_matching, activation_match_model_2_to_1
 
 # CONFIG
 DEV = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
@@ -72,13 +72,6 @@ def evaluate(model, loader):
 
 
 # %%
-# name = f"{WIDTH}_tau{TAU}_scale{SCALE}"
-# model1.load_state_dict(
-#     torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9999.pt")
-# )
-# model2.load_state_dict(
-#     torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_4000.pt")
-# )
 
 # LOAD MODEL WEIGHTS
 name = f"{WIDTH}_tau{TAU}_scale{SCALE}_msNone_seed0"
@@ -127,23 +120,19 @@ print("model2", "loss: {}, acc: {}".format(*evaluate(model2, trainloader)))
 print("model3", "loss: {}, acc: {}".format(*evaluate(model3, trainloader)))
 
 
-# %%
-name = f"{WIDTH}_tau{TAU}_scale{SCALE}"
-model1.load_state_dict(
-    torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9999.pt")
-)
-name = f"{WIDTH}_tau{TAU}_scale{SCALE}_ms{0}"
-model2.load_state_dict(
-    torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9999.pt")
-)
-
 cos = nn.CosineSimilarity(dim=-1, eps=1e-6)
 for (name, p1), (_, p2) in zip(model1.named_parameters(), model2.named_parameters()):
     print(name, cos(p1.view(-1), p2.view(-1)).mean().item())
 
 # %%
 print("dot product matching")
-model3 = dot_product_matching(model1, model2, inplace=True)
+model3 = dot_product_matching(model1, model2, inplace=False)
 for (name, p3), (_, p2) in zip(model3.named_parameters(), model2.named_parameters()):
     print(name,_,  cos(p3.view(-1), p2.view(-1)).mean().item())
+# %%
+print("activatio matching")
+activation_match_model_2_to_1(data, model1, model2)
+for (name, p1), (_, p2) in zip(model1.named_parameters(), model2.named_parameters()):
+    print(name,_,  cos(p1.view(-1), p2.view(-1)).mean().item())
+
 # %%

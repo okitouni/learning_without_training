@@ -16,7 +16,9 @@ def dot_product_matching(m1, m2, inplace=True):
     for l1, l2, l3 in zip(m1.children(), m2.children(), m3.children()):
         if not isinstance(l1, torch.nn.Linear):
             continue
-        w1 = l1.weight.data.clone() # this clone is necessary tho to avoid inplace ops (I think)
+        w1 = (
+            l1.weight.data.clone()
+        )  # this clone is necessary tho to avoid inplace ops (I think)
         w2 = l2.weight.data
         if prev_permutation is not None:
             w1 = w1.T[prev_permutation].T
@@ -37,17 +39,21 @@ def dot_product_matching_with_scores(m1, m2, inplace=True):
         if not isinstance(l1, GEMBase):
             continue
         if prev_permutation is not None:
-            l3.weight_scores.data = l3.weight_scores.data.T[prev_permutation].T # permute score columns
-            l3.weight.data = l3.weight.data.T[prev_permutation].T # permute actual weight columns
+            l3.weight_scores.data = l3.weight_scores.data.T[
+                prev_permutation
+            ].T  # permute score columns
+            l3.weight.data = l3.weight.data.T[
+                prev_permutation
+            ].T  # permute actual weight columns
         w1 = l3.masked_weight.data.detach().cpu().numpy()
         w2 = l2.masked_weight.data.detach().cpu().numpy()
         _, col_ind = linear_sum_assignment(-w1 @ w2.T)
-        l3.weight.data = l3.weight.data[col_ind] # permute weight rows
-        l3.weight_scores.data = l3.weight_scores.data[col_ind] # permute score rows
+        l3.weight.data = l3.weight.data[col_ind]  # permute weight rows
+        l3.weight_scores.data = l3.weight_scores.data[col_ind]  # permute score rows
         if l3.bias is not None:
             l3.bias.data = l3.bias.data[col_ind]
             l3.bias_scores.data = l3.bias_scores.data[col_ind]
-        prev_permutation = col_ind        
+        prev_permutation = col_ind
     return m3
 
 
@@ -163,31 +169,87 @@ def activation_matching(a1, a2):
     _, col_ind = linear_sum_assignment(-a1 @ a2.T)
     return col_ind
 
-
 def activation_match_model_2_to_1(data, model1, model2):
     # side effects on model2 (changing the weights to match model1)
     # W'_l = P_l @ W_l @ P_{l-1}.T
     # data.shape = (n_training_points, features)
     # model1 and model2 are of type torch.nn.Sequential
     prev_permutation = torch.arange(data.shape[1])
+    data1_i = data
+    data2_i = data
     for i, l2 in enumerate(model2):
-        data1_i = model1[:i](data)
-        data2_i = model2[:i](data)
-        permutation = activation_matching(data1_i, data2_i)
-        l2_inverse_prev_permuted = (l2.weight.data.T[:, prev_permutation]).T
-        l2.weight.data = l2_inverse_prev_permuted[:, permutation]
-        l2.bias.data = l2.bias.data[permutation]
-        prev_permutation = permutation
+        data1_i = model1[i](data1_i)
+        data2_i = model2[i](data2_i)
+        if isinstance(l2, torch.nn.Linear):
+          permutation = activation_matching(data1_i, data2_i)
+          l2.weight.data = l2.weight.data.T[prev_permutation].T[permutation]
+          if l2.bias is not None:
+            l2.bias.data = l2.bias.data[permutation]
+          prev_permutation = permutation
 
     return model2
+
+
+def test_activation_matching():
+    torch.manual_seed(10)
+    print("test activation matching with scores")
+    w1_A = torch.tensor([[1, 2], [3, 4]]).float()
+    w1_B = w1_A.flip(0).clone()
+
+    w2_A = torch.tensor([[5, 6], [7, 8]]).float()
+    w2_B = w2_A.flip(0, 1).clone()
+
+    w3_A = torch.tensor([[9, 10]]).float()
+    w3_B = w3_A.flip(1).clone()
+
+    m1 = torch.nn.Sequential(
+        torch.nn.Linear(2, 2, bias=False),
+        torch.nn.ReLU(),
+        torch.nn.Linear(2, 2, bias=False),
+        torch.nn.ReLU(),
+        torch.nn.Linear(2, 1, bias=False),
+    )
+    m2 = torch.nn.Sequential(
+        torch.nn.Linear(2, 2, bias=False),
+        torch.nn.ReLU(),
+        torch.nn.Linear(2, 2, bias=False),
+        torch.nn.ReLU(),
+        torch.nn.Linear(2, 1, bias=False),
+    )
+
+    m1[0].weight.data = w1_A
+    m1[2].weight.data = w2_A
+    m1[4].weight.data = w3_A
+    m2[0].weight.data = w1_B
+    m2[2].weight.data = w2_B
+    m2[4].weight.data = w3_B
+
+    # generate some data
+    data = torch.randn(100, 2)
+
+    def _print_all():
+        with torch.no_grad():
+            print_(m1[0].weight.data, m1[2].weight.data, m1[4].weight.data)
+            print_(
+                "result", m1(data)[:10, 0],
+            )
+            print_("B")
+            print_(m2[0].weight.data, m2[2].weight.data, m2[4].weight.data)
+            print_(
+                "prod", m2(data)[:10, 0],
+            )
+
+    print_("pre-matching")
+    _print_all()
+    activation_match_model_2_to_1(data, m1, m2)
+    print_("post-matching")
+    _print_all()
 
 
 if __name__ == "__main__":
     test_weight_matching()
     test_weight_matching_with_masks()
-    # a1 = torch.tensor([[1, 2], [4, 5], [7, 8]])
-    # a2 = torch.tensor([[2, 1], [4.9, 5], [7, 8]])
-    # print(activation_matching(a1, a2))
+    test_activation_matching()
 
 
 # %%
