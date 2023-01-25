@@ -37,13 +37,14 @@ class StraightThroughEstimator(torch.autograd.Function):
 
 
 class GEMBase:
-    def __init__(self, threshold, topk, train_weights, train_scores=True):
+    def __init__(self, threshold, topk, train_weights, train_scores=True, bias=True):
         self.weight.requires_grad_(train_weights)
-        self.bias.requires_grad_(train_weights)
         self.weight_scores = nn.Parameter(
             torch.rand_like(self.weight), requires_grad=train_scores
         )
-        self.bias_scores = nn.Parameter(torch.rand_like(self.bias), requires_grad=train_scores)
+        if bias:
+          self.bias.requires_grad_(train_weights)
+          self.bias_scores = nn.Parameter(torch.rand_like(self.bias), requires_grad=train_scores)
         self.topk = topk
         self.threshold = threshold
 
@@ -56,9 +57,9 @@ class GEMBase:
         return self.bias * self.get_mask(which="bias")
 
     def get_mask(self, which="weight"):
-        """Get the mask for the layer. Intended to be used for the backward evaluation to propagate 
+        """Get the mask for the layer. Intended to be used for the backward evaluation to propagate
             gradients through the mask into the scores.
-        
+
 
         Args:
             which (str, optional): Which mask to return, either "weight", "bias". Defaults to "weight".
@@ -94,7 +95,7 @@ class GEMBase:
             ValueError: If `which` is not one of "weight", "bias" or "both".
 
         Returns:
-            float: The sparsity of the layer as a fraction of total weights, biases or both. 
+            float: The sparsity of the layer as a fraction of total weights, biases or both.
         """
         with torch.no_grad():
             if which == "weight":
@@ -124,7 +125,7 @@ class GEMLinear(nn.Linear, GEMBase):
         nn.Linear.__init__(
             self, in_features, out_features, bias=bias, device=device, dtype=dtype
         )
-        GEMBase.__init__(self, threshold, topk, train_weights)
+        GEMBase.__init__(self, threshold, topk, train_weights, bias=bias)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return nn.functional.linear(input, self.masked_weight, self.masked_bias)
