@@ -2,7 +2,7 @@
 import torch
 from torch import nn
 from torchvision.datasets import MNIST
-from lwot.models import get_model, GEMBase
+from lwot.models import get_model
 from lwot.utils import Loader, accuracy
 from copy import deepcopy
 from matching import dot_product_matching, activation_match_model_2_to_1
@@ -94,30 +94,30 @@ print("max similarity", sim.max().item())
 print("min similarity", sim.min().item())
 print("std similarity", sim.std().item())
 # %%
-lambd = 0.5
-model3 = deepcopy(model1)
-for p1, p2, p3 in zip(model1.parameters(), model2.parameters(), model3.parameters()):
-    p3.data = lambd * p1.data + (1 - lambd) * p2.data
+def get_loss_barrier(model1, model2, lambd=0.5):
+  model3 = deepcopy(model1)
+  for p1, p2, p3 in zip(model1.parameters(), model2.parameters(), model3.parameters()):
+      p3.data = lambd * p1.data + (1 - lambd) * p2.data
 
-model3 = model3.to(DEV)
-model3.eval()
+  model3 = model3.to(DEV)
+  model3.eval()
 
-print(f"convex combination lambda {lambd}")
-sim = similarity(model3, model1, valloader)
-print("mean similarity", sim.mean().item())
-print("max similarity", sim.max().item())
-print("min similarity", sim.min().item())
-print("std similarity", sim.std().item())
+  print(f"convex combination lambda {lambd}")
+  sim = similarity(model3, model1, valloader)
+  print("mean similarity", sim.mean().item())
+  print("max similarity", sim.max().item())
+  print("min similarity", sim.min().item())
+  print("std similarity", sim.std().item())
 
-print("Val Performance")
-print("model1", "loss: {}, acc: {}".format(*evaluate(model1, valloader)))
-print("model2", "loss: {}, acc: {}".format(*evaluate(model2, valloader)))
-print("model3", "loss: {}, acc: {}".format(*evaluate(model3, valloader)))
+  print("Val Performance")
+  print("model1", "loss: {}, acc: {}".format(*evaluate(model1, valloader)))
+  print("model2", "loss: {}, acc: {}".format(*evaluate(model2, valloader)))
+  print("model3", "loss: {}, acc: {}".format(*evaluate(model3, valloader)))
 
-print("Train Performance")
-print("model1", "loss: {}, acc: {}".format(*evaluate(model1, trainloader)))
-print("model2", "loss: {}, acc: {}".format(*evaluate(model2, trainloader)))
-print("model3", "loss: {}, acc: {}".format(*evaluate(model3, trainloader)))
+  print("Train Performance")
+  print("model1", "loss: {}, acc: {}".format(*evaluate(model1, trainloader)))
+  print("model2", "loss: {}, acc: {}".format(*evaluate(model2, trainloader)))
+  print("model3", "loss: {}, acc: {}".format(*evaluate(model3, trainloader)))
 
 
 cos = nn.CosineSimilarity(dim=-1, eps=1e-6)
@@ -125,14 +125,17 @@ for (name, p1), (_, p2) in zip(model1.named_parameters(), model2.named_parameter
     print(name, cos(p1.view(-1), p2.view(-1)).mean().item())
 
 # %%
-print("dot product matching")
-model3 = dot_product_matching(model1, model2, inplace=False)
-for (name, p3), (_, p2) in zip(model3.named_parameters(), model2.named_parameters()):
-    print(name,_,  cos(p3.view(-1), p2.view(-1)).mean().item())
+# print("dot product matching")
+# model3 = dot_product_matching(model1, model2, inplace=False)
+# for (name, p3), (_, p2) in zip(model3.named_parameters(), model2.named_parameters()):
+#     print(name,_,  cos(p3.view(-1), p2.view(-1)).mean().item())
 # %%
-print("activatio matching")
-activation_match_model_2_to_1(data, model1, model2)
+
+print("activation matching")
+model3 = activation_match_model_2_to_1(train_dataset.data.to(DEV), model1, model2)
 for (name, p1), (_, p2) in zip(model1.named_parameters(), model2.named_parameters()):
     print(name,_,  cos(p1.view(-1), p2.view(-1)).mean().item())
 
 # %%
+get_loss_barrier(model1, model2)
+get_loss_barrier(model1, model3)

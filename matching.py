@@ -169,25 +169,29 @@ def activation_matching(a1, a2):
     _, col_ind = linear_sum_assignment(-a1 @ a2.T)
     return col_ind
 
+
 def activation_match_model_2_to_1(data, model1, model2):
     # side effects on model2 (changing the weights to match model1)
     # W'_l = P_l @ W_l @ P_{l-1}.T
     # data.shape = (n_training_points, features)
     # model1 and model2 are of type torch.nn.Sequential
-    prev_permutation = torch.arange(data.shape[1])
+    prev_permutation = None
     data1_i = data
     data2_i = data
-    for i, l2 in enumerate(model2):
+    model3 = deepcopy(model2)
+    for i, l3 in enumerate(model3):
         data1_i = model1[i](data1_i)
         data2_i = model2[i](data2_i)
-        if isinstance(l2, torch.nn.Linear):
-          permutation = activation_matching(data1_i, data2_i)
-          l2.weight.data = l2.weight.data.T[prev_permutation].T[permutation]
-          if l2.bias is not None:
-            l2.bias.data = l2.bias.data[permutation]
-          prev_permutation = permutation
+        if isinstance(l3, GEMBase):
+            permutation = activation_matching(data1_i, data2_i)
+            if prev_permutation is not None:
+                l3.weight.data = l3.weight.data.T[prev_permutation].T
+            l3.weight.data = l3.weight.data[permutation]
+            if l3.bias is not None:
+                l3.bias.data = l3.bias.data[permutation]
+            prev_permutation = permutation
 
-    return model2
+    return model3
 
 
 def test_activation_matching():

@@ -179,6 +179,7 @@ def get_model(
     topk=None,
     train_weights=False,
     flatten=True,
+    tau=None,
 ):
     if kind == "mlp":
         model = nn.Sequential()
@@ -214,6 +215,8 @@ def get_model(
                 width, 10, threshold=threshold, topk=topk, train_weights=train_weights
             ),
         )
+        if tau is not None:
+            model.add_module(Scale(tau, train=False))
         return model
     elif kind == "resnet":
         return resnet18()
