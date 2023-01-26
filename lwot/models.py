@@ -216,7 +216,7 @@ def get_model(
             ),
         )
         if tau is not None:
-            model.add_module(Scale(tau, train=False))
+            model.add_module("tau", Scale(tau, train=False))
         return model
     elif kind == "resnet":
         return resnet18()
