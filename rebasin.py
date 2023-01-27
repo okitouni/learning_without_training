@@ -10,15 +10,14 @@ from matching import dot_product_matching, activation_match_model_2_to_1
 # CONFIG
 DEV = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 # MODEL PARAMS
-SCALE = 2
+SCALE = 1
 WIDTH = 512
 # Loss PARAMS
-LR = 1e-3
+LR = 1e-4
 WD = 1e-5
-TAU = 100
+TAU = 1
 ALPHA = 1
 BATCHSIZE = -1
-WANDB = True
 
 torch.manual_seed(0)
 train_dataset = MNIST(root="/data/ml_data", train=True, download=True)
@@ -36,13 +35,15 @@ valloader = Loader(val_dataset, batch_size=-1, device=DEV)
 model1 = get_model(
     width=WIDTH,
     depth=3,
-    scale=SCALE
+    scale=SCALE,
+    tau=TAU
 )
 
 model2 = get_model(
     width=WIDTH,
     depth=3,
-    scale=SCALE
+    scale=SCALE,
+    tau=TAU
 )
 
 

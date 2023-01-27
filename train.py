@@ -11,18 +11,20 @@ import os
 EPOCHS = 10000
 DEV = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 # MODEL PARAMS
-SCALE = 2
+SCALE = 1
 WIDTH = 512
 TW = True # train weights # OK I added Masked seed = None should lead to regular training # cool beans
 MASK_SEED = None # none regular training
 # Loss PARAMS
 LR = 1e-3
 WD = 1e-4
-TAU = 100
+TAU = 1
 ALPHA = 1
 BATCHSIZE = -1
 WANDB = True
-SEED = 0
+SEED = 1
+DROPOUT=None # applied after every layer except last. None for no droupout
+BN=None # None for no batch norm "first" or "all" layers expect last
 
 name = f"{WIDTH}_tau{TAU}_scale{SCALE}_ms{MASK_SEED}_seed{SEED}"
 if WANDB:
@@ -56,7 +58,7 @@ valloader = Loader(val_dataset, batch_size=-1, device=DEV)
 
 
 # SETTING UP MODEL
-model = get_model(width=WIDTH, depth=3, scale=SCALE, train_weights=TW, tau=TAU)
+model = get_model(width=WIDTH, depth=3, scale=SCALE, train_weights=TW, tau=TAU, dropout=DROPOUT, batchnorm=BN)
 
 # Setting up seeded random mask
 if MASK_SEED is not None: torch.manual_seed(MASK_SEED)
@@ -75,8 +77,8 @@ for module in model.modules():
 
 # Setting up loss and optimizer
 model.to(DEV)
-criterion_ = nn.CrossEntropyLoss()
-criterion = lambda output, target: criterion_(output, target) 
+criterion_ = nn.MSELoss()
+criterion = lambda output, target: criterion_(output, torch.nn.functional.one_hot(target, 10).float())
 optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=WD)
 
 pbar = tqdm.tqdm(range(EPOCHS))
@@ -91,7 +93,7 @@ for epoch in pbar:
         output = model(data)
         loss = criterion(output, target)
         loss.backward()
-        acc = accuracy(output, target) 
+        acc = accuracy(output, target)
         optimizer.step()
         msg = f'Loss: {loss.item():.2f}|{valloss:.2f} - Acc: {acc:.1f}|{valacc:.1f}'
         sparsities = [f"{module.sparsity()*100:.1f}" for module in model if hasattr(module, 'sparsity')]
@@ -107,7 +109,7 @@ for epoch in pbar:
             valacc = accuracy(output, target)
 
     # WANDB LOGGING
-    if WANDB: 
+    if WANDB:
         wandb.log({"loss": loss, "acc": acc, "valloss": valloss, "valacc": valacc})
         for name, module in model.named_modules():
             if hasattr(module, 'sparsity'):

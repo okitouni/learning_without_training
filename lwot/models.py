@@ -180,6 +180,8 @@ def get_model(
     train_weights=False,
     flatten=True,
     tau=None,
+    dropout=None, #
+    batchnorm=None, # could be 'all' or 'first'
 ):
     if kind == "mlp":
         model = nn.Sequential()
@@ -195,6 +197,10 @@ def get_model(
             ),
         )
         model.add_module(f"relu{i}", nn.ReLU())
+        if batchnorm is not None:
+            model.add_module(f"bn{i}", nn.BatchNorm1d(width))
+        if dropout is not None:
+            model.add_module(f"droupout{i}", nn.Dropout(dropout))
 
         for _ in range(depth - 2):
             i += 1
@@ -209,6 +215,10 @@ def get_model(
                 ),
             )
             model.add_module(f"relu{i}", nn.ReLU())
+            if batchnorm == "all":
+                model.add_module(f"bn{i}", nn.BatchNorm1d(width))
+            if dropout is not None:
+                model.add_module(f"droupout{i}", nn.Dropout(dropout))
         model.add_module(
             f"gem{depth-1}",
             GEMLinear(
