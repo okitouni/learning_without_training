@@ -10,29 +10,52 @@ def print_(*args):
         print(arg)
 
 
-def dot_product_matching(m1, m2, inplace=True):
-    m3 = m1 if inplace else deepcopy(m1)
-    prev_permutation = None
-    for l1, l2, l3 in zip(m1.children(), m2.children(), m3.children()):
-        if not isinstance(l1, torch.nn.Linear):
-            continue
-        w1 = (
-            l1.weight.data.clone()
-        )  # this clone is necessary tho to avoid inplace ops (I think)
-        w2 = l2.weight.data
-        if prev_permutation is not None:
-            w1 = w1.T[prev_permutation].T
-        w1_ = w1.detach().cpu().numpy()
-        w2_ = w2.detach().cpu().numpy()
-        _, col_ind = linear_sum_assignment(-w1_ @ w2_.T)
-        prev_permutation = col_ind
-        l3.weight.data = w1[col_ind]
-        if l3.bias is not None:
-            l3.bias.data = l1.bias[col_ind]
+def weight_matching(m1, m2, inplace=True):
+    # TODO so far this only works for nn.Sequential's
+    permutations = [
+        torch.arange(len(l.weight))
+        for l in m1.children()
+        if isinstance(l, torch.nn.Linear)
+    ]
+    module_idx = [idx for idx in range(len(m1)) if isinstance(m1[idx], torch.nn.Linear)]
+    m3 = m2 if inplace else deepcopy(m2)
+    converged = False
+    while not converged:
+        converged = True
+        for i,l in enumerate(module_idx):
+            w1 = m1[l].weight.data
+            w2 = m2[l].weight.data
+
+            # this is the contribution: W1_l @ P_{l-1} @ W2_l.T
+            if l > 0:
+                prev_permutation = permutations[l - 1]
+            else:
+                prev_permutation = torch.arange(w2.shape[1])  # no previous permutation
+
+            total = -w1 @ w2.T[prev_permutation]
+
+            # this is the contribution W1_{l+1}.T @ P_{l+1} @ W2_{l+1}
+            if i < len(module_idx) - 1: # no contribution for last layer
+                next_permutation = permutations[l + 1]
+                w1_next = m1[l + 1].weight.data
+                w2_next = m2[l + 1].weight.data
+                w2_next = w2_next[next_permutation]
+                total -= w1_next.T @ w2_next
+
+            _, col_ind = linear_sum_assignment(total.detach().cpu().numpy())
+            if col_ind != prev_permutation:
+                converged = False
+            permutations[l] = col_ind
+
+    for i,l in enumerate(module_idx):
+        m3[l].weight.data = m1[l].weight.data[:, permutations[i]]
+        if m3[l].bias is not None:
+            m3[l].bias.data = m1[l].bias[permutations[i]]
+
     return m3
 
 
-def dot_product_matching_with_scores(m1, m2, inplace=True):
+def weight_matching_with_scores(m1, m2, inplace=True):
     m3 = m1 if inplace else deepcopy(m1)
     prev_permutation = None
     for l1, l2, l3 in zip(m1.children(), m2.children(), m3.children()):
@@ -93,7 +116,7 @@ def test_weight_matching():
 
     print_("pre-matching")
     _print_all()
-    dot_product_matching(m2, m1, inplace=True)
+    weight_matching(m2, m1, inplace=True)
     print_("post-matching")
     _print_all()
 
@@ -156,7 +179,7 @@ def test_weight_matching_with_masks():
 
     print_("pre-matching")
     _print_all()
-    dot_product_matching_with_scores(m2, m1, inplace=True)
+    weight_matching_with_scores(m2, m1, inplace=True)
     print_("post-matching")
     _print_all()
 

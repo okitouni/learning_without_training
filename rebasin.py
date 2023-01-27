@@ -1,6 +1,7 @@
 # %%
 import torch
 from torch import nn
+from torch.nn import functional as F
 from torchvision.datasets import MNIST
 from lwot.models import get_model
 from lwot.utils import Loader, accuracy
@@ -67,7 +68,7 @@ def evaluate(model, loader):
             x = x.to(DEV)
             y = y.to(DEV)
             y1 = model(x)
-            loss = nn.CrossEntropyLoss()(y1, y)
+            loss = F.mse_loss(y1, F.one_hot(y, 10))
             acc = accuracy(y1, y)
             return loss, acc
 
