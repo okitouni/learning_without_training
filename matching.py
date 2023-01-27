@@ -3,6 +3,7 @@ from scipy.optimize import linear_sum_assignment
 import torch
 from lwot.models import GEMLinear, GEMBase
 from copy import deepcopy
+import numpy as np
 
 
 def print_(*args):
@@ -12,45 +13,40 @@ def print_(*args):
 
 def weight_matching(m1, m2, inplace=True):
     # TODO so far this only works for nn.Sequential's
-    permutations = [
-        torch.arange(len(l.weight))
-        for l in m1.children()
-        if isinstance(l, torch.nn.Linear)
-    ]
+    permutations = [... for l in m1.children() if isinstance(l, torch.nn.Linear)]
     module_idx = [idx for idx in range(len(m1)) if isinstance(m1[idx], torch.nn.Linear)]
     m3 = m2 if inplace else deepcopy(m2)
     converged = False
     while not converged:
         converged = True
-        for i,l in enumerate(module_idx):
+        for i, l in enumerate(module_idx):
             w1 = m1[l].weight.data
             w2 = m2[l].weight.data
 
-            # this is the contribution: W1_l @ P_{l-1} @ W2_l.T
-            if l > 0:
-                prev_permutation = permutations[l - 1]
-            else:
-                prev_permutation = torch.arange(w2.shape[1])  # no previous permutation
-
+            prev_permutation = ... if l == 0 else permutations[i - 1]
             total = -w1 @ w2.T[prev_permutation]
 
             # this is the contribution W1_{l+1}.T @ P_{l+1} @ W2_{l+1}
-            if i < len(module_idx) - 1: # no contribution for last layer
-                next_permutation = permutations[l + 1]
+            if i < len(module_idx) - 1:  # no contribution for last layer
+                next_permutation = permutations[i + 1]
                 w1_next = m1[l + 1].weight.data
                 w2_next = m2[l + 1].weight.data
                 w2_next = w2_next[next_permutation]
                 total -= w1_next.T @ w2_next
 
             _, col_ind = linear_sum_assignment(total.detach().cpu().numpy())
-            if col_ind != prev_permutation:
+            if (col_ind != permutations[i]).any():
                 converged = False
             permutations[l] = col_ind
 
-    for i,l in enumerate(module_idx):
-        m3[l].weight.data = m1[l].weight.data[:, permutations[i]]
+    for i, l in enumerate(module_idx):
+        m3[l].weight.data = m2[l].weight.data[permutations[i]]
         if m3[l].bias is not None:
-            m3[l].bias.data = m1[l].bias[permutations[i]]
+            m3[l].bias.data = m2[l].bias[permutations[i]]
+            
+    for i, l in enumerate(module_idx):
+        if i == 0: continue
+        m3[l].weight.data = m2[l].weight.data.T[permutations[i-1]].T
 
     return m3
 
@@ -116,7 +112,7 @@ def test_weight_matching():
 
     print_("pre-matching")
     _print_all()
-    weight_matching(m2, m1, inplace=True)
+    weight_matching(m1, m2, inplace=True)
     print_("post-matching")
     _print_all()
 
@@ -275,8 +271,8 @@ def test_activation_matching():
 
 if __name__ == "__main__":
     test_weight_matching()
-    test_weight_matching_with_masks()
-    test_activation_matching()
+    # test_weight_matching_with_masks()
+    # test_activation_matching()
 
 
 # %%
