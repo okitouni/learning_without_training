@@ -6,7 +6,7 @@ from torchvision.datasets import MNIST
 from lwot.models import get_model
 from lwot.utils import Loader, accuracy
 from copy import deepcopy
-from matching import dot_product_matching, activation_match_model_2_to_1
+from matching import activation_match_model_2_to_1, weight_matching
 
 # CONFIG
 DEV = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
@@ -63,6 +63,7 @@ def similarity(model1, model2, loader):
 
 
 def evaluate(model, loader):
+    model.eval()
     with torch.no_grad():
         for x, y in loader:
             x = x.to(DEV)
@@ -102,24 +103,22 @@ def get_loss_barrier(model1, model2, lambd=0.5):
       p3.data = lambd * p1.data + (1 - lambd) * p2.data
 
   model3 = model3.to(DEV)
-  model3.eval()
-
   print(f"convex combination lambda {lambd}")
-  sim = similarity(model3, model1, valloader)
-  print("mean similarity", sim.mean().item())
-  print("max similarity", sim.max().item())
-  print("min similarity", sim.min().item())
-  print("std similarity", sim.std().item())
+#   sim = similarity(model3, model1, valloader)
+#   print("mean similarity", sim.mean().item())
+#   print("max similarity", sim.max().item())
+#   print("min similarity", sim.min().item())
+#   print("std similarity", sim.std().item())
 
   print("Val Performance")
   print("model1", "loss: {}, acc: {}".format(*evaluate(model1, valloader)))
   print("model2", "loss: {}, acc: {}".format(*evaluate(model2, valloader)))
-  print("model3", "loss: {}, acc: {}".format(*evaluate(model3, valloader)))
+  print("combo model", "loss: {}, acc: {}".format(*evaluate(model3, valloader)))
 
   print("Train Performance")
   print("model1", "loss: {}, acc: {}".format(*evaluate(model1, trainloader)))
   print("model2", "loss: {}, acc: {}".format(*evaluate(model2, trainloader)))
-  print("model3", "loss: {}, acc: {}".format(*evaluate(model3, trainloader)))
+  print("combo model", "loss: {}, acc: {}".format(*evaluate(model3, trainloader)))
 
 
 cos = nn.CosineSimilarity(dim=-1, eps=1e-6)
@@ -128,16 +127,27 @@ for (name, p1), (_, p2) in zip(model1.named_parameters(), model2.named_parameter
 
 # %%
 # print("dot product matching")
-# model3 = dot_product_matching(model1, model2, inplace=False)
+# model3 = weight_matching(model1, model2, inplace=False)
 # for (name, p3), (_, p2) in zip(model3.named_parameters(), model2.named_parameters()):
 #     print(name,_,  cos(p3.view(-1), p2.view(-1)).mean().item())
 # %%
 
-print("activation matching")
-model3 = activation_match_model_2_to_1(train_dataset.data.to(DEV), model1, model2)
-for (name, p1), (_, p2) in zip(model1.named_parameters(), model2.named_parameters()):
-    print(name,_,  cos(p1.view(-1), p2.view(-1)).mean().item())
+# print("activation matching")
+# model3 = activation_match_model_2_to_1(train_dataset.data.to(DEV), model1, model2)
+# for (name, p1), (_, p2) in zip(model1.named_parameters(), model2.named_parameters()):
+#     print(name,_,  cos(p1.view(-1), p2.view(-1)).mean().item())
+
+# # %%
+# get_loss_barrier(model1, model2)
+# get_loss_barrier(model1, model3)
 
 # %%
+print("pre-weight matching")
 get_loss_barrier(model1, model2)
+print("post-weight matching")
+model3 = weight_matching(model1, model2, inplace=True)
+print("inplace", model2 == model3)
 get_loss_barrier(model1, model3)
+
+
+# %%

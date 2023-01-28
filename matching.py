@@ -20,24 +20,25 @@ def weight_matching(m1, m2, inplace=True):
     while not converged:
         converged = True
         for i, l in enumerate(module_idx):
-            w1 = m1[l].weight.data
-            w2 = m2[l].weight.data
+            w1 = m1[l].weight.data.clone()
+            w2 = m2[l].weight.data.clone()
 
-            prev_permutation = ... if l == 0 else permutations[i - 1]
+            prev_permutation = ... if i == 0 else permutations[i - 1]
             total = -w1 @ w2.T[prev_permutation]
 
             # this is the contribution W1_{l+1}.T @ P_{l+1} @ W2_{l+1}
             if i < len(module_idx) - 1:  # no contribution for last layer
+                l_next = module_idx[i + 1]
                 next_permutation = permutations[i + 1]
-                w1_next = m1[l + 1].weight.data
-                w2_next = m2[l + 1].weight.data
+                w1_next = m1[l_next].weight.data.clone()
+                w2_next = m2[l_next].weight.data.clone()
                 w2_next = w2_next[next_permutation]
                 total -= w1_next.T @ w2_next
 
             _, col_ind = linear_sum_assignment(total.detach().cpu().numpy())
             if (col_ind != permutations[i]).any():
                 converged = False
-            permutations[l] = col_ind
+            permutations[i] = col_ind
 
     for i, l in enumerate(module_idx):
         m3[l].weight.data = m2[l].weight.data[permutations[i]]
@@ -89,32 +90,35 @@ def test_weight_matching():
     w3_B = torch.tensor([[9, 10]]).float()
     # w3_B = torch.tensor([[10, 9]]).float()
 
+    bias = True
     m1 = torch.nn.Sequential(
-        torch.nn.Linear(2, 2), torch.nn.Linear(2, 2), torch.nn.Linear(2, 1)
+        torch.nn.Linear(2, 2, bias=bias), torch.nn.ReLU(), torch.nn.Linear(2, 2, bias=bias), torch.nn.Linear(2, 1)
     )
     m2 = torch.nn.Sequential(
-        torch.nn.Linear(2, 2), torch.nn.Linear(2, 2), torch.nn.Linear(2, 1)
+        torch.nn.Linear(2, 2, bias=bias), torch.nn.ReLU(),torch.nn.Linear(2, 2, bias=bias), torch.nn.Linear(2, 1)
     )
     m1[0].weight.data = w1_A
-    m1[1].weight.data = w2_A
-    m1[2].weight.data = w3_A
+    m1[2].weight.data = w2_A
+    m1[3].weight.data = w3_A
     m2[0].weight.data = w1_B
-    m2[1].weight.data = w2_B
-    m2[2].weight.data = w3_B
+    m2[2].weight.data = w2_B
+    m2[3].weight.data = w3_B
 
-    def _print_all():
+    x = torch.rand(1, 2)
+    def _print_all(m1, m2):
         print_("A")
-        print_(m1[0].weight.data, m1[1].weight.data, m1[2].weight.data)
-        print_("prod", m1[0].weight.data.T @ m1[1].weight.data.T @ m1[2].weight.data.T)
+        print_(*[l.weight.data.tolist() for l in m1 if isinstance(l, torch.nn.Linear)])
+        print_(m1(x))
         print_("B")
-        print_(m2[0].weight.data, m2[1].weight.data, m2[2].weight.data)
-        print_("prod", m2[0].weight.data.T @ m2[1].weight.data.T @ m2[2].weight.data.T)
+        print_(*[l.weight.data.tolist() for l in m2 if isinstance(l, torch.nn.Linear)])
+        print_(m2(x))
 
     print_("pre-matching")
-    _print_all()
-    weight_matching(m1, m2, inplace=True)
+    _print_all(m1, m2)
+    m3 = weight_matching(m1, m2, inplace=False)
     print_("post-matching")
-    _print_all()
+    _print_all(m1, m3)
+    print(m3 == m2)
 
 
 def test_weight_matching_with_masks():
