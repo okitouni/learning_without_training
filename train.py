@@ -6,27 +6,49 @@ from lwot.utils import Loader, accuracy
 import tqdm
 import wandb
 import os
+import argparse
 
-# CONFIG # i made a new file (match_mnist_models), how (from where) do i load two saved models? It's in rebasin.py
-EPOCHS = 10000
-DEV = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+parser = argparse.ArgumentParser()
+parser.add_argument("--EPOCHS", type=int, default=10000)
+parser.add_argument("--DEV", type=str, default="cuda:0")
 # MODEL PARAMS
-SCALE = 1
-WIDTH = 512
-TW = True # train weights # OK I added Masked seed = None should lead to regular training # cool beans
-MASK_SEED = None # none regular training
-# Loss PARAMS
-LR = 1e-3
-WD = 1e-4
-TAU = 1
-ALPHA = 1
-BATCHSIZE = -1
-WANDB = True
-SEED = 1
-DROPOUT=None # applied after every layer except last. None for no droupout
-BN=None # None for no batch norm "first" or "all" layers expect last
+parser.add_argument("--SCALE", type=int, default=1)
+parser.add_argument("--WIDTH", type=int, default=512)
+parser.add_argument("--MASK_SEED", type=int, default=0)
+# parser.add_argument("--TW", type=bool, default=False)
+parser.add_argument("--SEED", type=int, default=0)
+parser.add_argument("--LR", type=float, default=1e-4)
+parser.add_argument("--WD", type=float, default=5e-7)
+parser.add_argument("--TAU", type=int, default=1)
+parser.add_argument("--ALPHA", type=float, default=1)
+parser.add_argument("--BATCHSIZE", type=int, default=-1)
+parser.add_argument("--wandb", action="store_true", default=False)
+parser.add_argument("--DROPOUT", type=float, default=None)
+parser.add_argument("--BN", type=str, default=None)
+args = parser.parse_args()
 
-name = f"{WIDTH}_tau{TAU}_scale{SCALE}_ms{MASK_SEED}_seed{SEED}"
+torch.set_float32_matmul_precision('high')
+EPOCHS = args.EPOCHS
+DEV = torch.device(args.DEV) if torch.cuda.is_available() else torch.device("cpu")
+# MODEL PARAMS
+SCALE = args.SCALE
+WIDTH = args.WIDTH
+MASK_SEED = args.MASK_SEED
+TW = MASK_SEED is None
+# Loss PARAMS
+SEED = args.SEED
+LR = args.LR
+WD = args.WD
+TAU = args.TAU
+ALPHA = args.ALPHA
+BATCHSIZE = args.BATCHSIZE
+WANDB = args.wandb
+DROPOUT = args.DROPOUT  # applied after every layer except last. None for no droupout
+BN = args.BN   # None for no batch norm "first" or "all" layers expect last
+
+name = f"{WIDTH}_tau{TAU}_scale{SCALE}_ms{MASK_SEED}_seed{SEED}_wd{WD:.0e}_TW{TW}_bn{BN}_drp{DROPOUT}"
+print("training run for", name)
+
 if WANDB:
     wandb.init(project=f"LWOT", entity="iaifi", name=name)
     wandb.config = {
@@ -58,11 +80,11 @@ valloader = Loader(val_dataset, batch_size=-1, device=DEV)
 
 
 # SETTING UP MODEL
-model = get_model(width=WIDTH, depth=3, scale=SCALE, train_weights=TW, tau=TAU, dropout=DROPOUT, batchnorm=BN)
+model_orig = get_model(width=WIDTH, depth=3, scale=SCALE, train_weights=TW, tau=TAU, dropout=DROPOUT, batchnorm=BN)
 
 # Setting up seeded random mask
 if MASK_SEED is not None: torch.manual_seed(MASK_SEED)
-for module in model.modules():
+for module in model_orig.modules():
     if isinstance(module, GEMBase):
         if MASK_SEED is not None:
             module.weight_scores.data = torch.rand_like(module.weight_scores.data)
@@ -72,11 +94,12 @@ for module in model.modules():
             module.weight_scores.data = torch.ones_like(module.weight_scores.data)
             if module.bias is not None:
                 module.bias_scores.data = torch.ones_like(module.bias_scores.data)
-            module.train_scores(False) # so now we can just run weight training? I think so. Try it. will it save to a new dir by itself? The whole ass pipeline great lol
+            module.train_scores(False) 
             module.train_weights(True)
 
 # Setting up loss and optimizer
-model.to(DEV)
+model_orig.to(DEV)
+model = torch.compile(model_orig)
 criterion_ = nn.MSELoss()
 criterion = lambda output, target: criterion_(output, torch.nn.functional.one_hot(target, 10).float())
 optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=WD)
@@ -84,6 +107,10 @@ optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=WD)
 pbar = tqdm.tqdm(range(EPOCHS))
 
 valloss, valacc = -1, -1
+
+if WANDB:
+    torch.save(model_orig, root + f"checkpoints/model_init.pt")
+    wandb.save(root+ f"checkpoints/model_init.pt", base_path=root)
 
 # TRAINING
 for epoch in pbar:
@@ -96,8 +123,7 @@ for epoch in pbar:
         acc = accuracy(output, target)
         optimizer.step()
         msg = f'Loss: {loss.item():.2f}|{valloss:.2f} - Acc: {acc:.1f}|{valacc:.1f}'
-        sparsities = [f"{module.sparsity()*100:.1f}" for module in model if hasattr(module, 'sparsity')]
-        # We can check weights # the terminal got stuck for me # new terminal just dropped
+        sparsities = [f"{module.sparsity()*100:.1f}" for module in model_orig if hasattr(module, 'sparsity')]
         msg += f' Sparsities: {sparsities}'
         pbar.set_description(msg)
 
@@ -111,11 +137,11 @@ for epoch in pbar:
     # WANDB LOGGING
     if WANDB:
         wandb.log({"loss": loss, "acc": acc, "valloss": valloss, "valacc": valacc})
-        for name, module in model.named_modules():
+        for name, module in model_orig.named_modules():
             if hasattr(module, 'sparsity'):
                 sparsity = module.sparsity()
                 wandb.log({f"sparsity_{name}": sparsity.item()})
         if epoch % (EPOCHS//20) == 0 or epoch == EPOCHS-1:
-            torch.save(model.state_dict(),
+            torch.save(model_orig.state_dict(),
                        root + f"checkpoints/MLP_{epoch}.pt")
             wandb.save(root+ f"checkpoints/MLP_{epoch}.pt", base_path=root)

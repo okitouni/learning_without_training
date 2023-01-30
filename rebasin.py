@@ -6,7 +6,7 @@ from torchvision.datasets import MNIST
 from lwot.models import get_model
 from lwot.utils import Loader, accuracy
 from copy import deepcopy
-from matching import activation_match_model_2_to_1, weight_matching
+from matching import weight_matching
 
 # CONFIG
 DEV = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
@@ -72,38 +72,57 @@ def evaluate(model, loader):
             loss = F.mse_loss(y1, F.one_hot(y, 10))
             acc = accuracy(y1, y)
             return loss, acc
-
+# %%
+cos = nn.CosineSimilarity(dim=-1, eps=1e-6)
+def weight_similarity(model1, model2, all=False):
+    res = {}
+    if all:
+        for (name, p1), (_, p2) in zip(model1.named_parameters(), model2.named_parameters()):
+            res[name] = cos(p1.reshape(-1), p2.reshape(-1)).mean().item()
+    else:
+        for (name, c1), (_, c2) in zip(model1.named_children(), model2.named_children()):
+            if hasattr(c1, "masked_weight"):
+                res[name+".masked_weight"] = cos(c1.masked_weight.reshape(-1), c2.masked_weight.reshape(-1)).mean().item()
+                res[name+".masked_bias"] = cos(c1.masked_bias.reshape(-1), c2.masked_bias.reshape(-1)).mean().item()
+    string = ["{}: {:.3f}".format(k, v) for k, v in res.items()]
+    return ", ".join(string)
 
 # %%
+torch.set_float32_matmul_precision('high')
+model1 = torch.compile(model1)
+model2 = torch.compile(model2)
 
 # LOAD MODEL WEIGHTS
-name = f"{WIDTH}_tau{TAU}_scale{SCALE}_msNone_seed0"
+# name = f"512_tau10_scale1_ms1_seed1_wd1e-07_TWFalse"
+name = f"512_tau10_scale1_ms0_seed0_wd5e-07_TWFalse_bnfirst_drp0.01"
+model1 = torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/model_init.pt")
 model1.load_state_dict(
     torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9999.pt")
 )
-name = f"{WIDTH}_tau{TAU}_scale{SCALE}_msNone_seed1"
+# name = f"512_tau10_scale1_ms0_seed1_wd1e-07_TWFalse"
+name = "512_tau10_scale1_ms1_seed0_wd5e-07_TWFalse_bnfirst_drp0.01"
+model2 = torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/model_init.pt")
 model2.load_state_dict(
     torch.load(f"/data/kitouni/LWOT/MNIST/MLP/{name}/checkpoints/MLP_9999.pt")
 )
-
 model1 = model1.to(DEV)
 model2 = model2.to(DEV)
 model1.eval()
 model2.eval()
 
-sim = similarity(model1, model2, valloader)
-print("mean similarity", sim.mean().item())
-print("max similarity", sim.max().item())
-print("min similarity", sim.min().item())
-print("std similarity", sim.std().item())
+# sim = similarity(model1, model2, valloader)
+# print("mean similarity", sim.mean().item())
+# print("max similarity", sim.max().item())
+# print("min similarity", sim.min().item())
+# print("std similarity", sim.std().item())
 # %%
 def get_loss_barrier(model1, model2, lambd=0.5):
-  model3 = deepcopy(model1)
+  model3 = deepcopy(model2)
   for p1, p2, p3 in zip(model1.parameters(), model2.parameters(), model3.parameters()):
       p3.data = lambd * p1.data + (1 - lambd) * p2.data
 
   model3 = model3.to(DEV)
-  print(f"convex combination lambda {lambd}")
+  print(f"Performance with convex combination lambda {lambd}")
 #   sim = similarity(model3, model1, valloader)
 #   print("mean similarity", sim.mean().item())
 #   print("max similarity", sim.max().item())
@@ -113,41 +132,21 @@ def get_loss_barrier(model1, model2, lambd=0.5):
   print("Val Performance")
   print("model1", "loss: {}, acc: {}".format(*evaluate(model1, valloader)))
   print("model2", "loss: {}, acc: {}".format(*evaluate(model2, valloader)))
-  print("combo model", "loss: {}, acc: {}".format(*evaluate(model3, valloader)))
+  print("combo model", "loss: {}, acc: {}".format(*evaluate(model3, valloader)), "<-----")
 
   print("Train Performance")
   print("model1", "loss: {}, acc: {}".format(*evaluate(model1, trainloader)))
   print("model2", "loss: {}, acc: {}".format(*evaluate(model2, trainloader)))
-  print("combo model", "loss: {}, acc: {}".format(*evaluate(model3, trainloader)))
-
-
-cos = nn.CosineSimilarity(dim=-1, eps=1e-6)
-for (name, p1), (_, p2) in zip(model1.named_parameters(), model2.named_parameters()):
-    print(name, cos(p1.view(-1), p2.view(-1)).mean().item())
-
-# %%
-# print("dot product matching")
-# model3 = weight_matching(model1, model2, inplace=False)
-# for (name, p3), (_, p2) in zip(model3.named_parameters(), model2.named_parameters()):
-#     print(name,_,  cos(p3.view(-1), p2.view(-1)).mean().item())
-# %%
-
-# print("activation matching")
-# model3 = activation_match_model_2_to_1(train_dataset.data.to(DEV), model1, model2)
-# for (name, p1), (_, p2) in zip(model1.named_parameters(), model2.named_parameters()):
-#     print(name,_,  cos(p1.view(-1), p2.view(-1)).mean().item())
-
-# # %%
-# get_loss_barrier(model1, model2)
-# get_loss_barrier(model1, model3)
-
+  print("combo model", "loss: {}, acc: {}".format(*evaluate(model3, trainloader)),"<-----")
 # %%
 print("pre-weight matching")
 get_loss_barrier(model1, model2)
+print("weight similarity before matching\n", weight_similarity(model1, model2),)
 print("post-weight matching")
-model3 = weight_matching(model1, model2, inplace=True)
-print("inplace", model2 == model3)
+model3 = weight_matching(model1, model2, inplace=False, on_masks=True)
 get_loss_barrier(model1, model3)
+print("weight similarity after matching\n", weight_similarity(model1, model3))
+
 
 
 # %%

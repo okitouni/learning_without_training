@@ -3,7 +3,6 @@ from scipy.optimize import linear_sum_assignment
 import torch
 from lwot.models import GEMLinear, GEMBase
 from copy import deepcopy
-import numpy as np
 
 
 def print_(*args):
@@ -11,17 +10,17 @@ def print_(*args):
         print(arg)
 
 
-def weight_matching(m1, m2, inplace=True):
+def weight_matching(m1, m2, inplace=True, on_masks=False):
     # TODO so far this only works for nn.Sequential's
-    permutations = [... for l in m1.children() if isinstance(l, torch.nn.Linear)]
-    module_idx = [idx for idx in range(len(m1)) if isinstance(m1[idx], torch.nn.Linear)]
+    permutations = [... for l in m1.children() if isinstance(l, GEMBase)]
+    module_idx = [idx for idx in range(len(m1)) if isinstance(m1[idx], GEMBase)]
     m3 = m2 if inplace else deepcopy(m2)
     converged = False
     while not converged:
         converged = True
         for i, l in enumerate(module_idx):
-            w1 = m1[l].weight.data.clone()
-            w2 = m2[l].weight.data.clone()
+            w1 = m1[l].masked_weight.data if on_masks else m1[l].weight.data
+            w2 = m2[l].masked_weight.data if on_masks else m2[l].weight.data
 
             prev_permutation = ... if i == 0 else permutations[i - 1]
             total = -w1 @ w2.T[prev_permutation]
@@ -30,8 +29,8 @@ def weight_matching(m1, m2, inplace=True):
             if i < len(module_idx) - 1:  # no contribution for last layer
                 l_next = module_idx[i + 1]
                 next_permutation = permutations[i + 1]
-                w1_next = m1[l_next].weight.data.clone()
-                w2_next = m2[l_next].weight.data.clone()
+                w1_next = m1[l_next].masked_weight.data if on_masks else m1[l_next].weight.data
+                w2_next = m2[l_next].masked_weight.data if on_masks else m2[l_next].weight.data
                 w2_next = w2_next[next_permutation]
                 total -= w1_next.T @ w2_next
 
@@ -41,40 +40,27 @@ def weight_matching(m1, m2, inplace=True):
             permutations[i] = col_ind
 
     for i, l in enumerate(module_idx):
-        m3[l].weight.data = m2[l].weight.data[permutations[i]]
+        m3[l].weight.data = m3[l].weight.data[permutations[i]]
+        if on_masks:
+            m3[l].weight_scores.data = m3[l].weight_scores.data[permutations[i]]
         if m3[l].bias is not None:
-            m3[l].bias.data = m2[l].bias[permutations[i]]
+            m3[l].bias.data = m3[l].bias[permutations[i]]
+            # HACK
+            if l + 2 < len(m3) and isinstance(m3[l+2], torch.nn.BatchNorm1d):
+                m3[l+2].running_mean.data = m3[l+2].running_mean.data[permutations[i]]
+                m3[l+2].running_var.data = m3[l+2].running_var.data[permutations[i]]
+
+            if on_masks:
+                m3[l].bias_scores.data = m3[l].bias_scores.data[permutations[i]]
             
     for i, l in enumerate(module_idx):
         if i == 0: continue
-        m3[l].weight.data = m2[l].weight.data.T[permutations[i-1]].T
+        m3[l].weight.data = m3[l].weight.data.T[permutations[i-1]].T
+        if on_masks:
+            m3[l].weight_scores.data = m3[l].weight_scores.data.T[permutations[i-1]].T
 
     return m3
 
-
-def weight_matching_with_scores(m1, m2, inplace=True):
-    m3 = m1 if inplace else deepcopy(m1)
-    prev_permutation = None
-    for l1, l2, l3 in zip(m1.children(), m2.children(), m3.children()):
-        if not isinstance(l1, GEMBase):
-            continue
-        if prev_permutation is not None:
-            l3.weight_scores.data = l3.weight_scores.data.T[
-                prev_permutation
-            ].T  # permute score columns
-            l3.weight.data = l3.weight.data.T[
-                prev_permutation
-            ].T  # permute actual weight columns
-        w1 = l3.masked_weight.data.detach().cpu().numpy()
-        w2 = l2.masked_weight.data.detach().cpu().numpy()
-        _, col_ind = linear_sum_assignment(-w1 @ w2.T)
-        l3.weight.data = l3.weight.data[col_ind]  # permute weight rows
-        l3.weight_scores.data = l3.weight_scores.data[col_ind]  # permute score rows
-        if l3.bias is not None:
-            l3.bias.data = l3.bias.data[col_ind]
-            l3.bias_scores.data = l3.bias_scores.data[col_ind]
-        prev_permutation = col_ind
-    return m3
 
 
 def test_weight_matching():
@@ -92,10 +78,10 @@ def test_weight_matching():
 
     bias = True
     m1 = torch.nn.Sequential(
-        torch.nn.Linear(2, 2, bias=bias), torch.nn.ReLU(), torch.nn.Linear(2, 2, bias=bias), torch.nn.Linear(2, 1)
+        GEMLinear(2, 2, bias=bias), torch.nn.ReLU(), GEMLinear(2, 2, bias=bias), GEMLinear(2, 1)
     )
     m2 = torch.nn.Sequential(
-        torch.nn.Linear(2, 2, bias=bias), torch.nn.ReLU(),torch.nn.Linear(2, 2, bias=bias), torch.nn.Linear(2, 1)
+        GEMLinear(2, 2, bias=bias), torch.nn.ReLU(),GEMLinear(2, 2, bias=bias), GEMLinear(2, 1)
     )
     m1[0].weight.data = w1_A
     m1[2].weight.data = w2_A
@@ -107,15 +93,15 @@ def test_weight_matching():
     x = torch.rand(1, 2)
     def _print_all(m1, m2):
         print_("A")
-        print_(*[l.weight.data.tolist() for l in m1 if isinstance(l, torch.nn.Linear)])
+        print_(*[l.weight.data.tolist() for l in m1 if hasattr(l, "weight")])
         print_(m1(x))
         print_("B")
-        print_(*[l.weight.data.tolist() for l in m2 if isinstance(l, torch.nn.Linear)])
+        print_(*[l.weight.data.tolist() for l in m2 if hasattr(l, "weight")])
         print_(m2(x))
 
     print_("pre-matching")
     _print_all(m1, m2)
-    m3 = weight_matching(m1, m2, inplace=False)
+    m3 = weight_matching(m1, m2, inplace=False, on_masks=False)
     print_("post-matching")
     _print_all(m1, m3)
     print(m3 == m2)
@@ -179,7 +165,7 @@ def test_weight_matching_with_masks():
 
     print_("pre-matching")
     _print_all()
-    weight_matching_with_scores(m2, m1, inplace=True)
+    weight_matching(m1, m2, inplace=True, on_masks=True)
     print_("post-matching")
     _print_all()
 
@@ -275,7 +261,7 @@ def test_activation_matching():
 
 if __name__ == "__main__":
     test_weight_matching()
-    # test_weight_matching_with_masks()
+    test_weight_matching_with_masks()
     # test_activation_matching()
 
 

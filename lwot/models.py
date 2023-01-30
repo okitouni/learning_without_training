@@ -198,7 +198,7 @@ def get_model(
         )
         model.add_module(f"relu{i}", nn.ReLU())
         if batchnorm is not None:
-            model.add_module(f"bn{i}", nn.BatchNorm1d(width))
+            model.add_module(f"bn{i}", nn.BatchNorm1d(width, affine=False))
         if dropout is not None:
             model.add_module(f"droupout{i}", nn.Dropout(dropout))
 
@@ -216,7 +216,7 @@ def get_model(
             )
             model.add_module(f"relu{i}", nn.ReLU())
             if batchnorm == "all":
-                model.add_module(f"bn{i}", nn.BatchNorm1d(width))
+                model.add_module(f"bn{i}", nn.BatchNorm1d(width, affine=False))
             if dropout is not None:
                 model.add_module(f"droupout{i}", nn.Dropout(dropout))
         model.add_module(
