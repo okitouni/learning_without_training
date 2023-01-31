@@ -181,7 +181,7 @@ def get_model(
     flatten=True,
     tau=None,
     dropout=None, #
-    batchnorm=None, # could be 'all' or 'first'
+    batchnorm="None", # could be 'all' or 'first'
 ):
     if kind == "mlp":
         model = nn.Sequential()
@@ -197,7 +197,7 @@ def get_model(
             ),
         )
         model.add_module(f"relu{i}", nn.ReLU())
-        if batchnorm is not None:
+        if batchnorm != "None":
             model.add_module(f"bn{i}", nn.BatchNorm1d(width, affine=False))
         if dropout is not None:
             model.add_module(f"droupout{i}", nn.Dropout(dropout))

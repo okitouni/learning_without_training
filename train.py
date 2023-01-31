@@ -6,26 +6,9 @@ from lwot.utils import Loader, accuracy
 import tqdm
 import wandb
 import os
-import argparse
+from config import root, format_name, get_parser
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--EPOCHS", type=int, default=10000)
-parser.add_argument("--DEV", type=str, default="cuda:0")
-# MODEL PARAMS
-parser.add_argument("--SCALE", type=int, default=1)
-parser.add_argument("--WIDTH", type=int, default=512)
-parser.add_argument("--MASK_SEED", type=int, default=0)
-# parser.add_argument("--TW", type=bool, default=False)
-parser.add_argument("--SEED", type=int, default=0)
-parser.add_argument("--LR", type=float, default=1e-4)
-parser.add_argument("--WD", type=float, default=5e-7)
-parser.add_argument("--TAU", type=int, default=1)
-parser.add_argument("--ALPHA", type=float, default=1)
-parser.add_argument("--BATCHSIZE", type=int, default=-1)
-parser.add_argument("--wandb", action="store_true", default=False)
-parser.add_argument("--DROPOUT", type=float, default=None)
-parser.add_argument("--BN", type=str, default=None)
-args = parser.parse_args()
+args = get_parser().parse_args()
 
 torch.set_float32_matmul_precision('high')
 EPOCHS = args.EPOCHS
@@ -46,7 +29,9 @@ WANDB = args.wandb
 DROPOUT = args.DROPOUT  # applied after every layer except last. None for no droupout
 BN = args.BN   # None for no batch norm "first" or "all" layers expect last
 
-name = f"{WIDTH}_tau{TAU}_scale{SCALE}_ms{MASK_SEED}_seed{SEED}_wd{WD:.0e}_TW{TW}_bn{BN}_drp{DROPOUT}"
+name = format_name(args)
+basedir = os.path.join(root, name, "checkpoints")
+
 print("training run for", name)
 
 if WANDB:
@@ -64,8 +49,7 @@ if WANDB:
         "dataset": "MNIST",
         "activation": "ReLU",
     }
-    root = f"/data/kitouni/LWOT/MNIST/MLP/{name}/"
-    os.makedirs(root + "checkpoints", exist_ok=True)
+    os.makedirs(basedir, exist_ok=True)
     wandb.save(__file__)
 
 # LOADING DATA
@@ -94,7 +78,7 @@ for module in model_orig.modules():
             module.weight_scores.data = torch.ones_like(module.weight_scores.data)
             if module.bias is not None:
                 module.bias_scores.data = torch.ones_like(module.bias_scores.data)
-            module.train_scores(False) 
+            module.train_scores(False)
             module.train_weights(True)
 
 # Setting up loss and optimizer
@@ -109,8 +93,8 @@ pbar = tqdm.tqdm(range(EPOCHS))
 valloss, valacc = -1, -1
 
 if WANDB:
-    torch.save(model_orig, root + f"checkpoints/model_init.pt")
-    wandb.save(root+ f"checkpoints/model_init.pt", base_path=root)
+    torch.save(model_orig, os.path.join(basedir, "model_init.pt"))
+    wandb.save(os.path.join(basedir, "model_init.pt"), base_path=basedir)
 
 # TRAINING
 for epoch in pbar:
@@ -143,5 +127,5 @@ for epoch in pbar:
                 wandb.log({f"sparsity_{name}": sparsity.item()})
         if epoch % (EPOCHS//20) == 0 or epoch == EPOCHS-1:
             torch.save(model_orig.state_dict(),
-                       root + f"checkpoints/MLP_{epoch}.pt")
-            wandb.save(root+ f"checkpoints/MLP_{epoch}.pt", base_path=root)
+                       os.path.join(basedir, f"MLP_{epoch}.pt"))
+            wandb.save(os.path.join(basedir, f"MLP_{epoch}.pt"), base_path=basedir)
