@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from torchvision.models import resnet18
+from cifar_model import ResNetBagOfTricks
 from .utils import topk_mask
 
 
@@ -172,6 +172,7 @@ class GEMConv2d(nn.Conv2d, GEMBase):
 
 def get_model(
     kind="mlp",
+    input_dim=748,
     width=512,
     depth=3,
     scale=None,
@@ -193,7 +194,7 @@ def get_model(
         model.add_module(
             f"gem{i}",
             GEMLinear(
-                784, width, threshold=threshold, topk=topk, train_weights=train_weights
+                input_dim, width, threshold=threshold, topk=topk, train_weights=train_weights
             ),
         )
         model.add_module(f"relu{i}", nn.ReLU())
@@ -228,5 +229,6 @@ def get_model(
         if tau is not None:
             model.add_module("tau", Scale(tau, train=False))
         return model
+
     elif kind == "resnet":
-        return resnet18()
+        return ResNetBagOfTricks() # TODO what args should this take

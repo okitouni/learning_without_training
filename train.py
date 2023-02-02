@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torchvision.datasets import MNIST
+from torchvision.datasets import MNIST, CIFAR10
 from lwot.models import get_model, GEMBase
 from lwot.utils import Loader, accuracy
 import tqdm
@@ -8,41 +8,28 @@ import wandb
 import os
 from config import root, format_name, get_parser
 
-args = get_parser().parse_args()
+args = get_parser("MNIST").parse_args()
 
 torch.set_float32_matmul_precision('high')
-EPOCHS = args.EPOCHS
 DEV = torch.device(args.DEV) if torch.cuda.is_available() else torch.device("cpu")
 # MODEL PARAMS
-SCALE = args.SCALE
-WIDTH = args.WIDTH
-MASK_SEED = args.MASK_SEED
-TW = MASK_SEED is None
+TW = args.MASK_SEED is None
 # Loss PARAMS
-SEED = args.SEED
-LR = args.LR
-WD = args.WD
-TAU = args.TAU
-ALPHA = args.ALPHA
-BATCHSIZE = args.BATCHSIZE
-WANDB = args.wandb
-DROPOUT = args.DROPOUT  # applied after every layer except last. None for no droupout
-BN = args.BN   # None for no batch norm "first" or "all" layers expect last
 
 name = format_name(args)
 basedir = os.path.join(root, name, "checkpoints")
 
 print("training run for", name)
 
-if WANDB:
+if args.WANDB:
     wandb.init(project=f"LWOT", entity="iaifi", name=name)
     wandb.config = {
-        "learning_rate": LR,
-        "weight_decay": WD,
-        "width": WIDTH,
+        "learning_rate": args.LR,
+        "weight_decay": args.WD,
+        "width": args.WIDTH,
         "depth": 3,
-        "epochs": EPOCHS,
-        "batch_size": BATCHSIZE,
+        "epochs": args.EPOCHS,
+        "batch_size": args.BATCHSIZE,
         "model": "MLP",
         "optimizer": "Adam",
         "loss": "CrossEntropy",
@@ -53,24 +40,29 @@ if WANDB:
     wandb.save(__file__)
 
 # LOADING DATA
-torch.manual_seed(SEED)
-train_dataset = MNIST(root='/data/ml_data', train=True, download=True)
-val_dataset = MNIST(root='/data/ml_data', train=False, download=True)
-train_dataset.data = train_dataset.data.float() / 255
-val_dataset.data = val_dataset.data.float() / 255
+torch.manual_seed(args.SEED)
 
-trainloader = Loader(train_dataset, batch_size=BATCHSIZE, device=DEV)
+DATA = CIFAR10 if args.DATASET == "CIFAR10" else "MNIST"
+
+train_dataset = DATA(root='/data/ml_data', train=True, download=True)
+val_dataset = DATA(root='/data/ml_data', train=False, download=True)
+norm = train_dataset.data.max()
+train_dataset.data = train_dataset.data.float() / norm
+val_dataset.data = val_dataset.data.float() / norm
+
+trainloader = Loader(train_dataset, batch_size=args.BATCHSIZE, device=DEV)
 valloader = Loader(val_dataset, batch_size=-1, device=DEV)
 
 
 # SETTING UP MODEL
-model_orig = get_model(width=WIDTH, depth=3, scale=SCALE, train_weights=TW, tau=TAU, dropout=DROPOUT, batchnorm=BN)
+model_orig = get_model(width=args.WIDTH, depth=3, scale=args.SCALE, train_weights=TW, tau=args.TAU, dropout=args.DROPOUT, batchnorm=args.BN)
+
 
 # Setting up seeded random mask
-if MASK_SEED is not None: torch.manual_seed(MASK_SEED)
+if args.MASK_SEED is not None: torch.manual_seed(args.MASK_SEED)
 for module in model_orig.modules():
     if isinstance(module, GEMBase):
-        if MASK_SEED is not None:
+        if args.MASK_SEED is not None:
             module.weight_scores.data = torch.rand_like(module.weight_scores.data)
             if module.bias is not None:
                 module.bias_scores.data = torch.rand_like(module.bias_scores.data)
@@ -86,13 +78,13 @@ model_orig.to(DEV)
 model = torch.compile(model_orig)
 criterion_ = nn.MSELoss()
 criterion = lambda output, target: criterion_(output, torch.nn.functional.one_hot(target, 10).float())
-optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=WD)
+optimizer = torch.optim.Adam(model.parameters(), lr=args.LR, weight_decay=args.WD)
 
-pbar = tqdm.tqdm(range(EPOCHS))
+pbar = tqdm.tqdm(range(args.EPOCHS))
 
 valloss, valacc = -1, -1
 
-if WANDB:
+if args.WANDB:
     torch.save(model_orig, os.path.join(basedir, "model_init.pt"))
     wandb.save(os.path.join(basedir, "model_init.pt"), base_path=basedir)
 
@@ -119,13 +111,13 @@ for epoch in pbar:
             valacc = accuracy(output, target)
 
     # WANDB LOGGING
-    if WANDB:
+    if args.WANDB:
         wandb.log({"loss": loss, "acc": acc, "valloss": valloss, "valacc": valacc})
         for name, module in model_orig.named_modules():
             if hasattr(module, 'sparsity'):
                 sparsity = module.sparsity()
                 wandb.log({f"sparsity_{name}": sparsity.item()})
-        if epoch % (EPOCHS//20) == 0 or epoch == EPOCHS-1:
+        if epoch % (args.EPOCHS//20) == 0 or epoch == args.EPOCHS-1:
             torch.save(model_orig.state_dict(),
-                       os.path.join(basedir, f"MLP_{epoch}.pt"))
-            wandb.save(os.path.join(basedir, f"MLP_{epoch}.pt"), base_path=basedir)
+                       os.path.join(basedir, f"{epoch}.pt"))
+            wandb.save(os.path.join(basedir, f"{epoch}.pt"), base_path=basedir)
