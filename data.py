@@ -16,7 +16,7 @@ def preprocess_cifar(data, device, dtype):
     return data
 
 
-def load_cifar(device, dtype, data_dir="data/"):
+def load_cifar(device, dtype, data_dir="/data/ml_data/"):
     train = torchvision.datasets.CIFAR10(root=data_dir, download=True)
     valid = torchvision.datasets.CIFAR10(root=data_dir, train=False)
 

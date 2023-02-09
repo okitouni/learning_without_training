@@ -1,7 +1,7 @@
 import torch
 from torch import nn
-from cifar_model import ResNetBagOfTricks
 from .utils import topk_mask
+from typing import Optional
 
 
 class Scale(nn.Module):
@@ -111,6 +111,43 @@ class GEMBase:
             else:
                 raise ValueError(f"Unknown sparsity type {which}")
 
+class GEMEmbedding(nn.Embedding, GEMBase):
+    def __init__(
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        padding_idx: Optional[int] = None,
+        max_norm: Optional[float] = None,
+        norm_type: float = 2.0,
+        scale_grad_by_freq: bool = False,
+        sparse: bool = False,
+        _weight: Optional[torch.Tensor] = None,
+        device=None,
+        dtype=None,
+        topk=None,
+        threshold=0.5,
+        train_weights=False,
+        train_scores=True,
+    ) -> None:
+        nn.Embedding.__init__(
+            self,
+            num_embeddings,
+            embedding_dim,
+            padding_idx,
+            max_norm,
+            norm_type,
+            scale_grad_by_freq,
+            sparse,
+            _weight,
+            device,
+            dtype,
+        )
+        GEMBase.__init__(self, threshold, topk, train_weights, train_scores, False)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return nn.functional.embedding(
+            input, self.masked_weight, self.padding_idx, self.max_norm, self.norm_type
+        )
 
 class GEMLinear(nn.Linear, GEMBase):
     def __init__(
@@ -123,11 +160,12 @@ class GEMLinear(nn.Linear, GEMBase):
         topk=None,
         threshold=0.5,
         train_weights=False,
+        train_scores=True,
     ) -> None:
         nn.Linear.__init__(
             self, in_features, out_features, bias=bias, device=device, dtype=dtype
         )
-        GEMBase.__init__(self, threshold, topk, train_weights, bias=bias)
+        GEMBase.__init__(self, threshold, topk, train_weights, train_scores, bias)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return nn.functional.linear(input, self.masked_weight, self.masked_bias)
@@ -150,6 +188,7 @@ class GEMConv2d(nn.Conv2d, GEMBase):
         topk=None,
         threshold=0.5,
         train_weights=False,
+        train_scores=True,
     ) -> None:
         nn.Conv2d.__init__(
             in_channels,
@@ -164,21 +203,22 @@ class GEMConv2d(nn.Conv2d, GEMBase):
             device,
             dtype,
         )
-        GEMBase.__init__(self, threshold, topk, train_weights)
+        GEMBase.__init__(self, threshold, topk, train_weights, train_scores, bias)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return self._conv_forward(input, self.masked_weight, self.masked_bias)
 
 
-def get_model(
+def mlp(
     kind="mlp",
-    input_dim=748,
+    input_dim=784,
     width=512,
     depth=3,
     scale=None,
     threshold=0.5,
     topk=None,
     train_weights=False,
+    train_scores=True,
     flatten=True,
     tau=None,
     dropout=None, #
@@ -229,6 +269,3 @@ def get_model(
         if tau is not None:
             model.add_module("tau", Scale(tau, train=False))
         return model
-
-    elif kind == "resnet":
-        return ResNetBagOfTricks() # TODO what args should this take

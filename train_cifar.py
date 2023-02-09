@@ -4,13 +4,12 @@ import torch.nn as nn
 import numpy as np
 import cifar_model as model
 from data import load_cifar
+from utils import save_model
 
 
-def train_cifar(args):
+def train_cifar(args, device, basedir):
     # Configurable parameters
-    device = torch.device(args.DEV) if torch.cuda.is_available() else torch.device("cpu")
     dtype = torch.float16 if device.type != "cpu" else torch.float32
-
     # First, the learning rate rises from 0 to 0.002 for the first 194 batches.
     # Next, the learning rate shrinks down to 0.0002 over the next 582 batches.
     lr_schedule = torch.cat(
@@ -19,9 +18,6 @@ def train_cifar(args):
 
     lr_schedule_bias = args.LR_BIAS_MULTIPLIER * lr_schedule
     lr_schedule *= args.LR_MULTIPLIER
-
-    # Set random seed to increase chance of reproducability
-    torch.manual_seed(args.SEED)
 
     # Load dataset
     train_data, train_targets, valid_data, valid_targets = load_cifar(device, dtype)
@@ -65,6 +61,8 @@ def train_cifar(args):
     print("\nepoch  batch  train time [sec]  validation accuracy  train accuracy  weight norm  max weight  min weight  weight var  frac_active")
     batch_count = 0
     for epoch in range(1, args.EPOCHS + 1):
+        if epoch % (args.EPOCHS//20) == 0 or epoch == args.EPOCHS-1:
+            save_model(basedir, valid_model, epoch)
 
         # Randomly shuffle training data
         indices = torch.randperm(len(train_data), device=device)
@@ -151,6 +149,8 @@ def train_cifar(args):
         active_fraction = np.sum([(w > .5).sum().item() for w,_ in weights]) / n_weights
 
         print(f"{epoch:5} {batch_count:6d} {valid_acc:20.4f} {train_acc:15.4f} {weights_norm:12.4f} {weights_max:11.4f} {weights_min:11.4f} {weights_var:11.4f} {active_fraction:12.4f}")
+
+
 
     return valid_acc
 

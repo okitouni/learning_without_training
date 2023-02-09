@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torchvision.datasets import MNIST
-from lwot.models import get_model
+from lwot.models import mlp
 from lwot.utils import Loader, accuracy
 from copy import deepcopy
 from matching import weight_matching
@@ -33,14 +33,14 @@ valloader = Loader(val_dataset, batch_size=-1, device=DEV)
 # SO THE LOGICAL FLOW IS A BIT WONKY lol
 # lets see
 # where are the models loaded
-model1 = get_model(
+model1 = mlp(
     width=WIDTH,
     depth=3,
     scale=SCALE,
     tau=TAU
 )
 
-model2 = get_model(
+model2 = mlp(
     width=WIDTH,
     depth=3,
     scale=SCALE,

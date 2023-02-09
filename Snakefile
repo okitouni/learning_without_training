@@ -27,17 +27,38 @@ def run_on_free_gpu(cmd, max_jobs_per_gpu=5):
 
 
 class Locations:
-  checkpoints = os.path.join(config.root, config.name, "checkpoints")
+  checkpoints_mnist = os.path.join(config.get_root("MNIST"), config.get_name("MNIST"), "checkpoints")
+  checkpoints_cifar = os.path.join(config.get_root("CIFAR"), config.get_name("CIFAR"), "checkpoints")
+  checkpoints_modular_addition = os.path.join(config.get_root("MODULAR_ADDITION"), config.get_name("MODULAR_ADDITION"), "checkpoints")
 
-rule many_seeds:
+rule all:
   input:
-    expand(Locations.checkpoints,
-            **config.Hyperparameters),
+    # expand(Locations.checkpoints_mnist,
+    #         **config.Hyperparameters_MNIST),
+    # expand(Locations.checkpoints_cifar,
+    #         **config.Hyperparameters_CIFAR)
+    expand(Locations.checkpoints_modular_addition,
+            **config.Hyperparameters_MODULAR_ADDITION)
 
 
-rule train_many_seeds:
+rule train_mnist:
   output:
-    directory(Locations.checkpoints)
+    directory(Locations.checkpoints_mnist)
   run:
-    cmd = config.train_cmd(wildcards)
+    cmd = config.train_cmd("MNIST", wildcards)
+    run_on_free_gpu(cmd)
+
+rule train_cifar:
+  output:
+    directory(Locations.checkpoints_cifar)
+  run:
+    cmd = config.train_cmd("CIFAR", wildcards)
+    run_on_free_gpu(cmd)
+
+rule train_modular_addition:
+  output:
+    directory(Locations.checkpoints_modular_addition)
+  run:
+    cmd = config.train_cmd("MODULAR_ADDITION", wildcards)
+    print(cmd)
     run_on_free_gpu(cmd)
