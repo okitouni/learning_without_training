@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from torchvision.models import resnet18
 from .utils import topk_mask
 
 
@@ -37,7 +36,7 @@ class StraightThroughEstimator(torch.autograd.Function):
 
 
 class GEMBase:
-    def __init__(self, threshold, topk, train_weights, train_scores=True, bias=True):
+    def __init__(self, threshold: float, topk_frac: float, train_weights:bool=False, train_scores:bool=True, bias:bool=True):
         self.weight.requires_grad_(train_weights)
         self.weight_scores = nn.Parameter(
             torch.rand_like(self.weight), requires_grad=train_scores
@@ -45,7 +44,7 @@ class GEMBase:
         if bias:
           self.bias.requires_grad_(train_weights)
           self.bias_scores = nn.Parameter(torch.rand_like(self.bias), requires_grad=train_scores)
-        self.topk = topk
+        self.topk_frac = topk_frac
         self.threshold = threshold
 
     @property
@@ -71,8 +70,9 @@ class GEMBase:
             Tensor: The mask for the layer.
         """
         scores = getattr(self, which + "_scores")
-        if self.topk is not None:
-            mask = topk_mask(scores, self.topk)
+        if self.topk_frac is not None:
+            k = round(self.topk_frac * scores.numel())
+            mask = topk_mask(scores, k)
         else:
             mask = (scores >= self.threshold).float()
         return StraightThroughEstimator.apply(scores, mask)
@@ -123,11 +123,12 @@ class GEMLinear(nn.Linear, GEMBase):
         topk=None,
         threshold=0.5,
         train_weights=False,
+        train_scores=True,
     ) -> None:
         nn.Linear.__init__(
             self, in_features, out_features, bias=bias, device=device, dtype=dtype
         )
-        GEMBase.__init__(self, threshold, topk, train_weights, bias=bias)
+        GEMBase.__init__(self, threshold, topk, train_weights, train_scores, bias)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return nn.functional.linear(input, self.masked_weight, self.masked_bias)
@@ -150,6 +151,7 @@ class GEMConv2d(nn.Conv2d, GEMBase):
         topk=None,
         threshold=0.5,
         train_weights=False,
+        train_scores=True,
     ) -> None:
         nn.Conv2d.__init__(
             in_channels,
@@ -164,40 +166,45 @@ class GEMConv2d(nn.Conv2d, GEMBase):
             device,
             dtype,
         )
-        GEMBase.__init__(self, threshold, topk, train_weights)
+        GEMBase.__init__(self, threshold, topk, train_weights, train_scores, bias)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         return self._conv_forward(input, self.masked_weight, self.masked_bias)
 
 
-def get_model(
+def mlp(
     kind="mlp",
+    input_dim=784,
+    output_dim=10,
     width=512,
     depth=3,
     scale=None,
     threshold=0.5,
     topk=None,
     train_weights=False,
+    train_scores=True,
     flatten=True,
     tau=None,
     dropout=None, #
-    batchnorm="None", # could be 'all' or 'first'
+    batchnorm="none", # could be 'all' or 'first'
 ):
     if kind == "mlp":
         model = nn.Sequential()
         if flatten:
             model.add_module("flatten", nn.Flatten())
+        if batchnorm != "none":
+            model.add_module(f"bn", nn.BatchNorm1d(input_dim, affine=False))
         if scale is not None:
             model.add_module("scale", Scale(scale, train=False))
         i = 0
         model.add_module(
             f"gem{i}",
             GEMLinear(
-                784, width, threshold=threshold, topk=topk, train_weights=train_weights
+                input_dim, width, threshold=threshold, topk=topk, train_weights=train_weights, train_scores=train_scores
             ),
         )
         model.add_module(f"relu{i}", nn.ReLU())
-        if batchnorm != "None":
+        if batchnorm == "all":
             model.add_module(f"bn{i}", nn.BatchNorm1d(width, affine=False))
         if dropout is not None:
             model.add_module(f"droupout{i}", nn.Dropout(dropout))
@@ -211,7 +218,7 @@ def get_model(
                     width,
                     threshold=threshold,
                     topk=topk,
-                    train_weights=train_weights,
+                    train_weights=train_weights, train_scores=train_scores
                 ),
             )
             model.add_module(f"relu{i}", nn.ReLU())
@@ -222,11 +229,9 @@ def get_model(
         model.add_module(
             f"gem{depth-1}",
             GEMLinear(
-                width, 10, threshold=threshold, topk=topk, train_weights=train_weights
+                width, output_dim, threshold=threshold, topk=topk, train_weights=train_weights, train_scores=train_scores
             ),
         )
         if tau is not None:
             model.add_module("tau", Scale(tau, train=False))
         return model
-    elif kind == "resnet":
-        return resnet18()
