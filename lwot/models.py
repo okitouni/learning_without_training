@@ -191,6 +191,7 @@ class GEMConv2d(nn.Conv2d, GEMBase):
         train_scores=True,
     ) -> None:
         nn.Conv2d.__init__(
+            self,
             in_channels,
             out_channels,
             kernel_size,
